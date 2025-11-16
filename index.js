@@ -1,107 +1,46 @@
 import express from "express";
 import axios from "axios";
-import fetch from "node-fetch";
-import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-import "pdfjs-dist/legacy/build/pdf.worker.js";
-import { createCanvas } from "canvas";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const app = express();
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json());
 
-// --- CONFIG ---
-const NANONETS_MODEL_ID = "f01a98b5-ec47-4d1a-8b26-f11a1d5ec318";
-const NANONETS_API_KEY = "cb5c4dd4-c2bf-11f0-98c9-1edd0239ff34";
+// No worker needed in Node environment
+pdfjsLib.GlobalWorkerOptions.workerSrc = null;
 
-// ------------------------------
-// DOWNLOAD PDF
-// ------------------------------
-async function downloadPDF(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-// ------------------------------
-// EXTRACT TEXT USING PDF.js
-// ------------------------------
-async function extractTextFromPDF(buffer, pageNumber) {
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-
-  if (pageNumber < 1 || pageNumber > pdf.numPages) {
-    throw new Error(`Invalid page number. PDF has ${pdf.numPages} pages.`);
-  }
-
-  const page = await pdf.getPage(pageNumber);
-  const textContent = await page.getTextContent();
-  return textContent.items.map(i => i.str).join(" ").trim();
-}
-
-// ------------------------------
-// FALLBACK OCR (NanoNets)
-// ------------------------------
-async function extractWithNanonets(buffer, pageNumber) {
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-  const page = await pdf.getPage(pageNumber);
-
-  const viewport = page.getViewport({ scale: 2 });
-  const canvas = createCanvas(viewport.width, viewport.height);
-  const ctx = canvas.getContext("2d");
-
-  await page.render({ canvasContext: ctx, viewport }).promise;
-
-  const imgBase64 = canvas.toDataURL().split(",")[1];
-
-  try {
-    const response = await axios.post(
-      `https://app.nanonets.com/api/v2/OCR/Model/${NANONETS_MODEL_ID}/LabelFile/`,
-      { file: imgBase64 },
-      {
-        auth: { username: NANONETS_API_KEY, password: "" },
-        headers: { "Content-Type": "application/json" },
-        timeout: 60000
-      }
-    );
-
-    if (response.data?.result?.length > 0) {
-      return response.data.result[0].prediction
-        .map(p => p.ocr_text)
-        .join("\n");
-    }
-
-    return "";
-  } catch (err) {
-    console.log("NanoNets Error:", err.message);
-    return "";
-  }
-}
-
-// ------------------------------
-// API ROUTE
-// ------------------------------
 app.post("/extract", async (req, res) => {
   try {
     const { pdfUrl, page } = req.body;
 
     if (!pdfUrl || !page) {
-      return res.status(400).json({ success: false, error: "Missing fields" });
+      return res.json({ success: false, error: "Missing parameters" });
     }
 
-    const buffer = await downloadPDF(pdfUrl);
+    // Fetch PDF as ArrayBuffer
+    const response = await axios.get(pdfUrl, { responseType: "arraybuffer" });
 
-    let text = await extractTextFromPDF(buffer, page);
+    // Convert ArrayBuffer → Uint8Array
+    const pdfData = new Uint8Array(response.data);
 
-    if (!text || text.length < 5) {
-      console.log("Using OCR fallback…");
-      text = await extractWithNanonets(buffer, page);
+    // Load PDF
+    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+
+    if (page < 1 || page > pdf.numPages) {
+      return res.json({ success: false, error: "Invalid page number" });
     }
 
-    if (!text) return res.json({ success: false, error: "Page unreadable" });
+    const pdfPage = await pdf.getPage(page);
+    const textContent = await pdfPage.getTextContent();
 
-    return res.json({ success: true, text });
-  } catch (err) {
-    return res.json({ success: false, error: err.message });
+    const items = textContent.items.map(i => i.str);
+    const pageText = items.join(" ");
+
+    return res.json({ success: true, text: pageText });
+
+  } catch (error) {
+    console.error("Extraction Error:", error);
+    return res.json({ success: false, error: error.message });
   }
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`PDF API running on ${PORT}`));
+app.listen(10000, () => console.log("PDF API running on port 10000"));
