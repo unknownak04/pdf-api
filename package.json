@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "express": "^4.18.2",
-    "pdfjs-dist": "^3.9.179",
-    "node-fetch": "^3.3.2"
+    "axios": "^1.6.7"
   }
 }
+
