@@ -1,12 +1,9 @@
 import express from "express";
 import axios from "axios";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs"; // Correct import for Node.js
 
 const app = express();
 app.use(express.json());
-
-// No worker needed in Node environment
-pdfjsLib.GlobalWorkerOptions.workerSrc = null;
 
 app.post("/extract", async (req, res) => {
   try {
@@ -16,13 +13,15 @@ app.post("/extract", async (req, res) => {
       return res.json({ success: false, error: "Missing parameters" });
     }
 
-    // Fetch PDF as ArrayBuffer
-    const response = await axios.get(pdfUrl, { responseType: "arraybuffer" });
+    // Fetch PDF as raw ArrayBuffer
+    const response = await axios.get(pdfUrl, {
+      responseType: "arraybuffer",
+    });
 
-    // Convert ArrayBuffer → Uint8Array
+    // Convert to Uint8Array for pdfjs
     const pdfData = new Uint8Array(response.data);
 
-    // Load PDF
+    // Load document
     const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
 
     if (page < 1 || page > pdf.numPages) {
@@ -32,15 +31,7 @@ app.post("/extract", async (req, res) => {
     const pdfPage = await pdf.getPage(page);
     const textContent = await pdfPage.getTextContent();
 
-    const items = textContent.items.map(i => i.str);
-    const pageText = items.join(" ");
+    const text = textContent.items.map((item) => item.str).join(" ");
 
-    return res.json({ success: true, text: pageText });
-
-  } catch (error) {
-    console.error("Extraction Error:", error);
-    return res.json({ success: false, error: error.message });
-  }
-});
-
-app.listen(10000, () => console.log("PDF API running on port 10000"));
+    return res.json({ success: true, text });
+  } catch
