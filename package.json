@@ -5,6 +5,7 @@
   "dependencies": {
     "express": "^4.18.2",
     "axios": "^1.6.7",
-    "pdfjs-dist": "^4.2.67"
+    "pdfjs-dist": "^3.9.179",
+    "canvas": "^2.11.2"
   }
 }
