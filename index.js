@@ -1,79 +1,71 @@
 import express from "express";
-import axios from "axios";
+import fetch from "node-fetch";
+import FormData from "form-data";
 
 const app = express();
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json());
 
-// 🚨 Your Nanonets API Key
-const NANONETS_API_KEY = "cb5c4dd4-c2bf-11f0-98c9-1edd0239ff34";
+const MODEL_ID = "f01a98b5-ec47-4d1a-8b26-f11a1d5ec318";
+const API_KEY = "cb5c4dd4-c2bf-11f0-98c9-1edd0239ff34";
 
 app.post("/extract", async (req, res) => {
   try {
     const { pdfUrl, page } = req.body;
 
-    if (!pdfUrl || !page) {
-      return res.status(400).json({ error: "Missing pdfUrl or page" });
-    }
+    // 1. Download PDF file from the URL
+    const pdfResponse = await fetch(pdfUrl);
+    const pdfBuffer = await pdfResponse.arrayBuffer();
 
-    // Download PDF
-    const pdfResponse = await axios.get(pdfUrl, {
-      responseType: "arraybuffer",
-      timeout: 60000,
-    });
+    // 2. Prepare Nanonets FormData
+    const form = new FormData();
+    form.append("file", Buffer.from(pdfBuffer), "catalog.pdf");
 
-    const pdfBase64 = Buffer.from(pdfResponse.data).toString("base64");
-
-    // Send to Nanonets OCR
-    const nanoRes = await axios.post(
-      "https://app.nanonets.com/api/v2/OCR/Model/GeneralOCR/LabelFiles/",
-      { file: pdfBase64 },
+    // 3. Send PDF to Nanonets OCR
+    const nnResponse = await fetch(
+      `https://app.nanonets.com/api/v2/OCR/Model/${MODEL_ID}/LabelFile/`,
       {
+        method: "POST",
+        body: form,
         headers: {
           Authorization:
-            "Basic " +
-            Buffer.from(`${NANONETS_API_KEY}:`).toString("base64"),
-          "Content-Type": "application/json",
+            "Basic " + Buffer.from(API_KEY + ":").toString("base64"),
         },
-        timeout: 60000,
       }
     );
 
-    if (!nanoRes.data?.results?.length) {
-      return res.status(500).json({ error: "No OCR results returned" });
+    const data = await nnResponse.json();
+
+    if (!data.result || !data.result[0] || !data.result[0].page_data) {
+      return res.json({
+        success: false,
+        error: "Invalid OCR response from Nanonets",
+      });
     }
 
-    const blocks = nanoRes.data.results[0].text_blocks || [];
+    // 4. Extract text from requested page
+    const pageData = data.result[0].page_data.find(
+      (p) => p.page === Number(page)
+    );
 
-    const pages = {};
-    blocks.forEach((b) => {
-      const pg = b.page || 1;
-      if (!pages[pg]) pages[pg] = [];
-      pages[pg].push(b.text);
-    });
-
-    const pageText = pages[page];
-    if (!pageText) {
-      return res.status(404).json({ error: "Requested page not found" });
+    if (!pageData) {
+      return res.json({
+        success: false,
+        error: "Page not found in OCR output",
+      });
     }
+
+    const extractedText = pageData.text || "";
 
     return res.json({
       success: true,
-      page: page,
-      text: pageText.join(" "),
+      text: extractedText,
     });
   } catch (err) {
-    console.error("OCR Error:", err);
-    return res.status(500).json({
-      error: err.message || "Unknown server/OCR error",
+    return res.json({
+      success: false,
+      error: err.message,
     });
   }
 });
 
-// basic home route
-app.get("/", (req, res) => {
-  res.send("PDF OCR API running (ESM mode).");
-});
-
-app.listen(10000, () => {
-  console.log("Server running on port 10000");
-});
+app.listen(3000, () => console.log("PDF API running on port 3000"));
